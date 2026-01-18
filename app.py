@@ -3,15 +3,9 @@ import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
 
-# -----------------------------
-# 기본 설정
-# -----------------------------
 st.set_page_config(layout="wide")
 st.title("📊 자산 비교 대시보드")
 
-# -----------------------------
-# 자산 정의
-# -----------------------------
 ASSETS = {
     "Bitcoin": "BTC-USD",
     "S&P500": "^GSPC",
@@ -21,7 +15,7 @@ ASSETS = {
 }
 
 # -----------------------------
-# 사이드바: 색상 선택
+# 색상 선택
 # -----------------------------
 st.sidebar.header("🎨 색상 선택")
 
@@ -34,12 +28,12 @@ default_colors = {
 }
 
 colors = {
-    asset: st.sidebar.color_picker(asset, default_colors[asset])
-    for asset in ASSETS
+    k: st.sidebar.color_picker(k, v)
+    for k, v in default_colors.items()
 }
 
 # -----------------------------
-# 기간 선택
+# 기간 / 자산 선택
 # -----------------------------
 period = st.selectbox(
     "기간 선택",
@@ -47,9 +41,6 @@ period = st.selectbox(
     index=0
 )
 
-# -----------------------------
-# 자산 선택
-# -----------------------------
 selected_assets = st.multiselect(
     "보고 싶은 자산 선택",
     list(ASSETS.keys()),
@@ -57,28 +48,42 @@ selected_assets = st.multiselect(
 )
 
 # -----------------------------
-# 데이터 다운로드 (🔥 에러 방어 핵심)
+# 데이터 로드 (🔥 완전 방탄)
 # -----------------------------
 @st.cache_data
 def load_data(period):
-    series_dict = {}
+    valid_series = []
 
     for name, ticker in ASSETS.items():
         df = yf.download(ticker, period=period, progress=False)
 
-        if df is not None and not df.empty:
-            series_dict[name] = df["Close"]
+        if df is None or df.empty:
+            continue
 
-    return pd.DataFrame(series_dict)
+        close = df.get("Close")
+
+        # 🔥 핵심 방어
+        if not isinstance(close, pd.Series):
+            continue
+        if len(close) < 2:
+            continue
+
+        close.name = name
+        valid_series.append(close)
+
+    if not valid_series:
+        return pd.DataFrame()
+
+    return pd.concat(valid_series, axis=1)
 
 price_df = load_data(period)
 
 if price_df.empty:
-    st.error("데이터를 불러올 수 없습니다. 기간을 변경해 주세요.")
+    st.error("데이터를 불러오지 못했습니다. 기간을 바꿔보세요.")
     st.stop()
 
 # -----------------------------
-# 가격 차트 (선 그래프)
+# 가격 차트 (라인)
 # -----------------------------
 st.subheader("📈 가격 차트")
 
@@ -98,10 +103,9 @@ for asset in selected_assets:
 
 fig.update_layout(
     height=500,
-    xaxis_title="날짜",
-    yaxis_title="가격",
     hovermode="x unified",
-    legend_title="자산"
+    xaxis_title="날짜",
+    yaxis_title="가격"
 )
 
 st.plotly_chart(fig, use_container_width=True)
