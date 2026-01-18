@@ -1,14 +1,18 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import plotly.graph_objects as go
 
-st.set_page_config(page_title="Asset Dashboard", layout="wide")
-
+# -----------------------------
+# 기본 설정
+# -----------------------------
+st.set_page_config(layout="wide")
 st.title("📊 자산 비교 대시보드")
 
-assets = {
+# -----------------------------
+# 자산 정의
+# -----------------------------
+ASSETS = {
     "Bitcoin": "BTC-USD",
     "S&P500": "^GSPC",
     "Nasdaq": "^IXIC",
@@ -16,60 +20,88 @@ assets = {
     "SCHD": "SCHD"
 }
 
-period = st.selectbox(
-    "기간 선택",
-    ["1mo", "3mo", "6mo", "1y", "2y"],
-    index=3
-)
-
-interval = "1d"
-
-selected = st.multiselect(
-    "보고 싶은 자산 선택",
-    list(assets.keys()),
-    default=list(assets.keys())
-)
+# -----------------------------
+# 사이드바: 색상 선택
+# -----------------------------
+st.sidebar.header("🎨 색상 선택")
 
 colors = {}
-st.sidebar.header("🎨 색상 선택")
-for a in selected:
-    colors[a] = st.sidebar.color_picker(a, "#ffaa00")
+default_colors = {
+    "Bitcoin": "#2dd4bf",
+    "S&P500": "#ef4444",
+    "Nasdaq": "#f97316",
+    "Gold": "#eab308",
+    "SCHD": "#dc2626",
+}
 
-@st.cache_data(ttl=300)
-def load_data():
+for asset in ASSETS:
+    colors[asset] = st.sidebar.color_picker(
+        asset, default_colors[asset]
+    )
+
+# -----------------------------
+# 기간 선택
+# -----------------------------
+period = st.selectbox(
+    "기간 선택",
+    ["1mo", "3mo", "6mo", "1y", "2y", "5y"],
+    index=0
+)
+
+# -----------------------------
+# 자산 선택
+# -----------------------------
+selected_assets = st.multiselect(
+    "보고 싶은 자산 선택",
+    list(ASSETS.keys()),
+    default=list(ASSETS.keys())
+)
+
+# -----------------------------
+# 데이터 다운로드
+# -----------------------------
+@st.cache_data
+def load_data(period):
     data = {}
-    for name, ticker in assets.items():
-        df = yf.download(ticker, period=period, interval=interval)
-        df["Return"] = df["Close"].pct_change()
-        data[name] = df
-    return data
+    for name, ticker in ASSETS.items():
+        df = yf.download(ticker, period=period)
+        data[name] = df["Close"]
+    return pd.DataFrame(data)
 
-data = load_data()
+price_df = load_data(period).dropna()
+
+# -----------------------------
+# 가격 차트 (A단계 핵심: 선 그래프)
+# -----------------------------
+st.subheader("📈 가격 차트")
 
 fig = go.Figure()
-for a in selected:
-    fig.add_trace(go.Scatter(
-        x=data[a].index,
-        y=data[a]["Close"],
-        name=a,
-        line=dict(color=colors[a], width=2)
-    ))
+
+for asset in selected_assets:
+    fig.add_trace(
+        go.Scatter(
+            x=price_df.index,
+            y=price_df[asset],
+            mode="lines",          # 🔥 핵심: 점 → 선
+            name=asset,
+            line=dict(color=colors[asset], width=2)
+        )
+    )
 
 fig.update_layout(
     height=500,
-    title="가격 차트",
     xaxis_title="날짜",
-    yaxis_title="가격"
+    yaxis_title="가격",
+    hovermode="x unified",
+    legend_title="자산"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-if len(selected) >= 2:
-    st.subheader("📈 상관계수")
-    returns = pd.concat(
-        [data[a]["Return"] for a in selected],
-        axis=1
-    ).dropna()
-    returns.columns = selected
-    corr = returns.corr()
-    st.dataframe(corr)
+# -----------------------------
+# 상관계수
+# -----------------------------
+st.subheader("📊 상관계수")
+
+corr = price_df[selected_assets].corr()
+st.dataframe(corr.style.format("{:.3f}"))
