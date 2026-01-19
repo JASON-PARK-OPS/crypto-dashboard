@@ -1,153 +1,105 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import plotly.graph_objects as go
-import smtplib
-from email.mime.text import MIMEText
-from datetime import datetime
+import plotly.express as px
 
 st.set_page_config(layout="wide")
-st.title("🚨 US Market Risk Early Warning System")
+st.title("Macro Market Regime Dashboard")
 
-# ===============================
-# USER SETTINGS
-# ===============================
-EMAIL_RECEIVER = "rjsfyd413@naver.com"
-
-# ===============================
+# =====================
 # Sidebar
-# ===============================
-period = st.sidebar.selectbox(
-    "Analysis Period",
-    ["3mo", "6mo", "1y", "3y"],
-    index=2
+# =====================
+freq = st.sidebar.selectbox(
+    "Timeframe",
+    ["Daily", "Weekly", "Monthly"]
 )
 
-# ===============================
-# Assets
-# ===============================
-assets = {
-    "S&P 500": "^GSPC",
-    "Nasdaq": "^IXIC",
-    "Bitcoin": "BTC-USD",
-    "Gold": "GC=F"
+freq_map = {
+    "Daily": "1d",
+    "Weekly": "1wk",
+    "Monthly": "1mo"
 }
 
+# =====================
+# Data Loader
+# =====================
 @st.cache_data
-def load_data(period):
+def load_prices(interval):
+    tickers = {
+        "Bitcoin": "BTC-USD",
+        "S&P 500": "^GSPC",
+        "Nasdaq": "^IXIC",
+        "Gold": "GC=F"
+    }
+
     series = []
-    for name, ticker in assets.items():
-        df = yf.download(ticker, period=period, interval="1d", progress=False)
-        if df.empty:
-            continue
-        close = df["Close"]
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
-        series.append(close.rename(name))
-    return pd.concat(series, axis=1, join="outer").sort_index()
 
-price = load_data(period)
-
-# ===============================
-# Normalize
-# ===============================
-norm = price.copy()
-for c in norm.columns:
-    base = norm[c].dropna().iloc[0]
-    norm[c] = norm[c] / base * 100
-
-# ===============================
-# 200D MA
-# ===============================
-ma200 = price.rolling(200).mean()
-
-# ===============================
-# SIGNAL LOGIC
-# ===============================
-btc_20d = norm["Bitcoin"].iloc[-1] - norm["Bitcoin"].iloc[-20]
-gold_20d = norm["Gold"].iloc[-1] - norm["Gold"].iloc[-20]
-ratio = price["Nasdaq"] / price["S&P 500"]
-ratio_down = ratio.iloc[-1] < ratio.iloc[-20]
-
-sp_below_200 = price["S&P 500"].iloc[-1] < ma200["S&P 500"].iloc[-1]
-nas_below_200 = price["Nasdaq"].iloc[-1] < ma200["Nasdaq"].iloc[-1]
-
-# ===============================
-# SIGNAL STATE
-# ===============================
-signal = "NORMAL"
-
-if btc_20d < -5 and gold_20d > 3 and ratio_down:
-    signal = "EARLY WARNING"
-
-if signal == "EARLY WARNING" and sp_below_200 and nas_below_200:
-    signal = "CONFIRMED DRAWDOWN"
-
-# ===============================
-# EMAIL FUNCTION
-# ===============================
-def send_email(subject, body):
-    try:
-        msg = MIMEText(body)
-        msg["Subject"] = subject
-        msg["From"] = st.secrets["EMAIL_SENDER"]
-        msg["To"] = EMAIL_RECEIVER
-
-        server = smtplib.SMTP_SSL("smtp.naver.com", 465)
-        server.login(
-            st.secrets["EMAIL_SENDER"],
-            st.secrets["EMAIL_PASSWORD"]
+    for name, ticker in tickers.items():
+        df = yf.download(
+            ticker,
+            period="10y",
+            interval=interval,
+            auto_adjust=True,
+            progress=False
         )
-        server.send_message(msg)
-        server.quit()
-    except:
-        pass
 
-# ===============================
-# EMAIL TRIGGER (1/day)
-# ===============================
-today = datetime.now().strftime("%Y-%m-%d")
-if st.session_state.get("last_mail") != today:
-    if signal in ["EARLY WARNING", "CONFIRMED DRAWDOWN"]:
-        send_email(
-            f"[Market Alert] {signal}",
-            f"""
-Risk Level: {signal}
+        s = df["Close"].rename(name)
+        series.append(s)
 
-- Bitcoin momentum collapse
-- Gold defensive rotation
-- Nasdaq/S&P ratio weakening
-- 200D MA status:
-  S&P500: {'Below' if sp_below_200 else 'Above'}
-  Nasdaq: {'Below' if nas_below_200 else 'Above'}
+    df = pd.concat(series, axis=1)
 
-Action: Reduce risk / Delay entry
-"""
-        )
-        st.session_state["last_mail"] = today
+    # 🔧 핵심: 끊김 제거
+    df = df.ffill().dropna()
+    return df
 
-# ===============================
-# VISUAL
-# ===============================
-fig = go.Figure()
-for c in norm.columns:
-    fig.add_trace(go.Scatter(
-        x=norm.index,
-        y=norm[c],
-        name=c,
-        mode="lines"
-    ))
 
-st.plotly_chart(fig, use_container_width=True)
+price_df = load_prices(freq_map[freq])
 
-# ===============================
-# STATUS
-# ===============================
-st.markdown("## 🚨 Current Market Status")
+# =====================
+# 1️⃣ Normalized Trend
+# =====================
+norm_df = price_df / price_df.iloc[0] * 100
 
-if signal == "CONFIRMED DRAWDOWN":
-    st.error("🔴 CONFIRMED MARKET DRAWDOWN – Avoid new equity positions")
-elif signal == "EARLY WARNING":
-    st.warning("🟠 EARLY RISK WARNING – Stay defensive")
-else:
-    st.success("🟢 Market Stable – No systemic risk detected")
+fig1 = px.line(
+    norm_df,
+    title="Normalized Performance (Trend Comparison)"
+)
+
+st.plotly_chart(fig1, use_container_width=True)
+
+# =====================
+# 2️⃣ Nasdaq vs S&P500 Relative Strength
+# =====================
+rs_df = pd.DataFrame()
+rs_df["Nasdaq / S&P500"] = price_df["Nasdaq"] / price_df["S&P 500"]
+
+fig2 = px.line(
+    rs_df,
+    title="Relative Strength: Nasdaq vs S&P 500"
+)
+
+st.plotly_chart(fig2, use_container_width=True)
+
+# =====================
+# 3️⃣ Risk Regime Signal
+# =====================
+signal_df = pd.DataFrame(index=price_df.index)
+
+signal_df["Risk_On"] = (
+    price_df["S&P 500"].pct_change(20) +
+    price_df["Nasdaq"].pct_change(20)
+) / 2
+
+signal_df["Safe_Haven"] = (
+    price_df["Gold"].pct_change(20)
+)
+
+signal_df["Risk_Signal"] = signal_df["Risk_On"] - signal_df["Safe_Haven"]
+
+fig3 = px.line(
+    signal_df,
+    y="Risk_Signal",
+    title="Market Risk Regime Signal (Risk-On vs Safe-Haven)"
+)
+
+st.plotly_chart(fig3, use_container_width=True)
