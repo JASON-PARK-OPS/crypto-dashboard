@@ -1,137 +1,93 @@
 import streamlit as st
+import yfinance as yf
 import pandas as pd
 import plotly.graph_objects as go
-from datetime import datetime, timedelta
-import requests
 
-st.set_page_config(layout="wide")
-st.title("📊 자산 비교 대시보드")
+st.set_page_config(page_title="Asset Trend Comparison", layout="wide")
 
-# -----------------------------
-# 자산 정의
-# -----------------------------
-STOOQ_ASSETS = {
-    "S&P500": "^SPX",
-    "Nasdaq": "^NDQ",
-    "Gold": "XAUUSD",
-}
-
-CRYPTO_ASSETS = {
-    "Bitcoin": "BTC-USD"
-}
+st.title("📈 Bitcoin vs S&P500 vs Nasdaq vs Gold")
+st.caption("Normalized trend comparison (base = 100)")
 
 # -----------------------------
-# 색상 선택
+# Sidebar controls
 # -----------------------------
-st.sidebar.header("🎨 색상 선택")
-
-default_colors = {
-    "Bitcoin": "#2dd4bf",
-    "S&P500": "#ef4444",
-    "Nasdaq": "#f97316",
-    "Gold": "#eab308",
-}
-
-colors = {
-    k: st.sidebar.color_picker(k, v)
-    for k, v in default_colors.items()
-}
-
-# -----------------------------
-# 기간 선택
-# -----------------------------
-period_label = st.selectbox(
-    "기간 선택",
-    ["1개월", "3개월", "6개월", "1년", "2년"],
-    index=0
+timeframe = st.sidebar.selectbox(
+    "Timeframe",
+    ["1Y", "3Y", "5Y", "MAX"]
 )
 
-DAYS_MAP = {
-    "1개월": 30,
-    "3개월": 90,
-    "6개월": 180,
-    "1년": 365,
-    "2년": 730,
+interval_map = {
+    "1Y": "1d",
+    "3Y": "1d",
+    "5Y": "1d",
+    "MAX": "1wk"
 }
 
-days = DAYS_MAP[period_label]
-start_date = datetime.today() - timedelta(days=days)
+period_map = {
+    "1Y": "1y",
+    "3Y": "3y",
+    "5Y": "5y",
+    "MAX": "max"
+}
+
+interval = interval_map[timeframe]
+period = period_map[timeframe]
 
 # -----------------------------
-# Stooq 데이터
+# Tickers
 # -----------------------------
+tickers = {
+    "Bitcoin": "BTC-USD",
+    "S&P 500": "^GSPC",
+    "Nasdaq": "^IXIC",
+    "Gold": "GC=F"
+}
+
 @st.cache_data
-def load_stooq(start):
-    series = []
-
-    for name, ticker in STOOQ_ASSETS.items():
-        url = f"https://stooq.com/q/d/l/?s={ticker.lower()}&i=d"
-        df = pd.read_csv(url)
-        df["Date"] = pd.to_datetime(df["Date"])
-        df = df[df["Date"] >= start]
-
-        close = df.set_index("Date")["Close"]
-        close.name = name
-        series.append(close)
-
-    return pd.concat(series, axis=1)
+def load_data(ticker, period, interval):
+    df = yf.download(ticker, period=period, interval=interval, progress=False)
+    return df["Close"]
 
 # -----------------------------
-# 비트코인 (Coinbase)
+# Load & normalize
 # -----------------------------
-@st.cache_data
-def load_bitcoin(start):
-    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
-    params = {"granularity": 86400}  # 하루
-    data = requests.get(url, params=params).json()
+data = pd.DataFrame()
 
-    df = pd.DataFrame(data, columns=["time", "low", "high", "open", "close", "volume"])
-    df["Date"] = pd.to_datetime(df["time"], unit="s")
-    df = df[df["Date"] >= start]
+for name, ticker in tickers.items():
+    series = load_data(ticker, period, interval)
+    if not series.empty:
+        data[name] = series
 
-    close = df.set_index("Date")["close"].sort_index()
-    close.name = "Bitcoin"
-    return close.to_frame()
+# 날짜 정렬 & 결측 제거
+data = data.dropna()
+data = data / data.iloc[0] * 100  # Normalize to 100
 
 # -----------------------------
-# 데이터 합치기
+# Plot
 # -----------------------------
-price_df = load_stooq(start_date)
-btc_df = load_bitcoin(start_date)
-
-price_df = pd.concat([price_df, btc_df], axis=1)
-
-# -----------------------------
-# 차트
-# -----------------------------
-st.subheader("📈 가격 차트")
-
 fig = go.Figure()
 
-for asset in price_df.columns:
+for col in data.columns:
     fig.add_trace(
         go.Scatter(
-            x=price_df.index,
-            y=price_df[asset],
+            x=data.index,
+            y=data[col],
             mode="lines",
-            name=asset,
-            line=dict(color=colors.get(asset, "#999999"), width=2)
+            name=col
         )
     )
 
 fig.update_layout(
-    height=500,
+    height=600,
+    xaxis_title="Date",
+    yaxis_title="Normalized Value (Base = 100)",
     hovermode="x unified",
-    xaxis_title="날짜",
-    yaxis_title="가격"
+    template="plotly_white"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
-# -----------------------------
-# 상관계수
-# -----------------------------
-st.subheader("📊 상관계수")
-
-corr = price_df.dropna().corr()
-st.dataframe(corr.style.format("{:.3f}"))
+st.info(
+    "All assets are normalized to 100 at the starting point "
+    "to clearly compare long-term trends."
+)
