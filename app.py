@@ -7,7 +7,7 @@ st.set_page_config(layout="wide")
 st.title("📉 US Market Risk Signal Dashboard")
 
 # -----------------------
-# Sidebar (FIXED)
+# Sidebar
 # -----------------------
 period = st.sidebar.selectbox(
     "Analysis Period",
@@ -15,7 +15,6 @@ period = st.sidebar.selectbox(
     index=3
 )
 
-# 항상 일봉 사용 (스무스함 우선)
 interval = "1d"
 
 # -----------------------
@@ -30,7 +29,7 @@ assets = {
 
 @st.cache_data
 def load_data(period):
-    df_all = pd.DataFrame()
+    series_list = []
 
     for name, ticker in assets.items():
         df = yf.download(
@@ -41,20 +40,27 @@ def load_data(period):
         )
 
         if not df.empty:
-            df_all[name] = df["Close"]
+            s = df["Close"].rename(name)
+            series_list.append(s)
 
-    # 날짜 기준으로 정렬 + 보간
-    df_all = df_all.sort_index()
-    df_all = df_all.interpolate(method="time")
+    # OUTER JOIN (중요!)
+    price_df = pd.concat(series_list, axis=1, join="outer")
 
-    return df_all
+    # 날짜 정렬
+    price_df = price_df.sort_index()
+
+    return price_df
 
 price_df = load_data(period)
 
 # -----------------------
-# Normalize
+# Normalize (자산별 첫 유효값 기준)
 # -----------------------
-normalized = price_df / price_df.iloc[0] * 100
+normalized = price_df.copy()
+
+for col in normalized.columns:
+    first_valid = normalized[col].dropna().iloc[0]
+    normalized[col] = normalized[col] / first_valid * 100
 
 # -----------------------
 # Plot
@@ -83,16 +89,16 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------
-# Explanation
+# Interpretation
 # -----------------------
 st.markdown("""
-### 📌 How to interpret (for US stock investors)
+### 📌 How to use this (US stock investor perspective)
 
-- **Bitcoin weakens first** → risk appetite shrinking
-- **Nasdaq underperforms S&P500** → growth stocks losing momentum
-- **Gold rising while stocks stall** → defensive rotation
-- **S&P500 breaks last** → confirms real drawdown
+- **Bitcoin weakens first** → speculative risk is leaving
+- **Nasdaq underperforms S&P500** → growth stocks vulnerable
+- **Gold rises while equities stall** → defensive positioning
+- **S&P500 breaks trend last** → confirms real market drawdown
 
-This chart helps you **avoid entering US equities too early**,
-not to trade Bitcoin itself.
+This dashboard is designed to help you **delay entry or reduce exposure**
+before major US equity corrections.
 """)
