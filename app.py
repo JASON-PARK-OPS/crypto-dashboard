@@ -21,7 +21,7 @@ freq_map = {
 }
 
 # =====================
-# Data Loader
+# Data Loader (FIXED)
 # =====================
 @st.cache_data
 def load_prices(interval):
@@ -43,13 +43,20 @@ def load_prices(interval):
             progress=False
         )
 
-        s = df["Close"].rename(name)
-        series.append(s)
+        close = df["Close"]
+
+        # 🔧 핵심 수정: Close가 DataFrame이면 Series로 변환
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+
+        close.name = name
+        series.append(close)
 
     df = pd.concat(series, axis=1)
 
-    # 🔧 핵심: 끊김 제거
+    # 🔧 거래일 차이로 생긴 끊김 제거
     df = df.ffill().dropna()
+
     return df
 
 
@@ -70,7 +77,7 @@ st.plotly_chart(fig1, use_container_width=True)
 # =====================
 # 2️⃣ Nasdaq vs S&P500 Relative Strength
 # =====================
-rs_df = pd.DataFrame()
+rs_df = pd.DataFrame(index=price_df.index)
 rs_df["Nasdaq / S&P500"] = price_df["Nasdaq"] / price_df["S&P 500"]
 
 fig2 = px.line(
@@ -81,7 +88,7 @@ fig2 = px.line(
 st.plotly_chart(fig2, use_container_width=True)
 
 # =====================
-# 3️⃣ Risk Regime Signal
+# 3️⃣ Market Risk Signal
 # =====================
 signal_df = pd.DataFrame(index=price_df.index)
 
@@ -90,16 +97,14 @@ signal_df["Risk_On"] = (
     price_df["Nasdaq"].pct_change(20)
 ) / 2
 
-signal_df["Safe_Haven"] = (
-    price_df["Gold"].pct_change(20)
-)
+signal_df["Safe_Haven"] = price_df["Gold"].pct_change(20)
 
 signal_df["Risk_Signal"] = signal_df["Risk_On"] - signal_df["Safe_Haven"]
 
 fig3 = px.line(
     signal_df,
     y="Risk_Signal",
-    title="Market Risk Regime Signal (Risk-On vs Safe-Haven)"
+    title="Market Risk Regime Signal (Risk-On minus Safe-Haven)"
 )
 
 st.plotly_chart(fig3, use_container_width=True)
