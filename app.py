@@ -2,17 +2,22 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from datetime import datetime, timedelta
+import requests
 
 st.set_page_config(layout="wide")
 st.title("📊 자산 비교 대시보드")
 
 # -----------------------------
-# Stooq 티커 (안정)
+# 자산 정의
 # -----------------------------
-ASSETS = {
+STOOQ_ASSETS = {
     "S&P500": "^SPX",
     "Nasdaq": "^NDQ",
     "Gold": "XAUUSD",
+}
+
+CRYPTO_ASSETS = {
+    "Bitcoin": "BTC-USD"
 }
 
 # -----------------------------
@@ -21,6 +26,7 @@ ASSETS = {
 st.sidebar.header("🎨 색상 선택")
 
 default_colors = {
+    "Bitcoin": "#2dd4bf",
     "S&P500": "#ef4444",
     "Nasdaq": "#f97316",
     "Gold": "#eab308",
@@ -52,16 +58,15 @@ days = DAYS_MAP[period_label]
 start_date = datetime.today() - timedelta(days=days)
 
 # -----------------------------
-# 데이터 로드 (Stooq)
+# Stooq 데이터
 # -----------------------------
 @st.cache_data
-def load_data(start):
+def load_stooq(start):
     series = []
 
-    for name, ticker in ASSETS.items():
+    for name, ticker in STOOQ_ASSETS.items():
         url = f"https://stooq.com/q/d/l/?s={ticker.lower()}&i=d"
         df = pd.read_csv(url)
-
         df["Date"] = pd.to_datetime(df["Date"])
         df = df[df["Date"] >= start]
 
@@ -71,7 +76,30 @@ def load_data(start):
 
     return pd.concat(series, axis=1)
 
-price_df = load_data(start_date)
+# -----------------------------
+# 비트코인 (Coinbase)
+# -----------------------------
+@st.cache_data
+def load_bitcoin(start):
+    url = "https://api.exchange.coinbase.com/products/BTC-USD/candles"
+    params = {"granularity": 86400}  # 하루
+    data = requests.get(url, params=params).json()
+
+    df = pd.DataFrame(data, columns=["time", "low", "high", "open", "close", "volume"])
+    df["Date"] = pd.to_datetime(df["time"], unit="s")
+    df = df[df["Date"] >= start]
+
+    close = df.set_index("Date")["close"].sort_index()
+    close.name = "Bitcoin"
+    return close.to_frame()
+
+# -----------------------------
+# 데이터 합치기
+# -----------------------------
+price_df = load_stooq(start_date)
+btc_df = load_bitcoin(start_date)
+
+price_df = pd.concat([price_df, btc_df], axis=1)
 
 # -----------------------------
 # 차트
@@ -87,7 +115,7 @@ for asset in price_df.columns:
             y=price_df[asset],
             mode="lines",
             name=asset,
-            line=dict(color=colors[asset], width=2)
+            line=dict(color=colors.get(asset, "#999999"), width=2)
         )
     )
 
