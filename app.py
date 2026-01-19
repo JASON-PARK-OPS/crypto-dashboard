@@ -5,55 +5,59 @@ import plotly.graph_objects as go
 
 st.set_page_config(layout="wide")
 st.title("📉 US Market Risk Signal Dashboard")
-st.caption("Detect potential drawdown signals before investing in US equities")
 
 # -----------------------
-# Sidebar
+# Sidebar (FIXED)
 # -----------------------
 period = st.sidebar.selectbox(
     "Analysis Period",
-    ["1mo", "3mo", "6mo", "1y", "3y"]
+    ["1mo", "3mo", "6mo", "1y", "3y"],
+    index=3
 )
 
-interval_map = {
-    "1mo": "1d",
-    "3mo": "1d",
-    "6mo": "1d",
-    "1y": "1d",
-    "3y": "1wk"
-}
-
-interval = interval_map[period]
+# 항상 일봉 사용 (스무스함 우선)
+interval = "1d"
 
 # -----------------------
-# Assets (role-based)
+# Assets
 # -----------------------
 assets = {
-    "S&P 500 (Market Core)": "^GSPC",
-    "Nasdaq (Growth Risk)": "^IXIC",
-    "Bitcoin (High Risk Lead)": "BTC-USD",
-    "Gold (Safe Haven)": "GC=F"
+    "S&P 500": "^GSPC",
+    "Nasdaq": "^IXIC",
+    "Bitcoin": "BTC-USD",
+    "Gold": "GC=F"
 }
 
 @st.cache_data
-def load_close(ticker):
-    df = yf.download(ticker, period=period, interval=interval, progress=False)
-    return df["Close"]
+def load_data(period):
+    df_all = pd.DataFrame()
 
-data = pd.DataFrame()
+    for name, ticker in assets.items():
+        df = yf.download(
+            ticker,
+            period=period,
+            interval=interval,
+            progress=False
+        )
 
-for name, ticker in assets.items():
-    s = load_close(ticker)
-    if not s.empty:
-        data[name] = s
+        if not df.empty:
+            df_all[name] = df["Close"]
 
-data = data.dropna()
+    # 날짜 기준으로 정렬 + 보간
+    df_all = df_all.sort_index()
+    df_all = df_all.interpolate(method="time")
 
-# Normalize
-normalized = data / data.iloc[0] * 100
+    return df_all
+
+price_df = load_data(period)
 
 # -----------------------
-# Main Trend Chart
+# Normalize
+# -----------------------
+normalized = price_df / price_df.iloc[0] * 100
+
+# -----------------------
+# Plot
 # -----------------------
 fig = go.Figure()
 
@@ -63,35 +67,32 @@ for col in normalized.columns:
             x=normalized.index,
             y=normalized[col],
             name=col,
-            mode="lines"
+            mode="lines",
+            line=dict(width=2),
+            connectgaps=True
         )
     )
 
 fig.update_layout(
-    height=600,
+    height=650,
     hovermode="x unified",
-    yaxis_title="Relative Performance (Base = 100)",
-    template="plotly_white"
+    template="plotly_white",
+    yaxis_title="Relative Performance (Base = 100)"
 )
 
 st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------
-# Interpretation Guide
+# Explanation
 # -----------------------
-st.markdown("## 🔍 How to read this chart (Trader perspective)")
-
 st.markdown("""
-- **Bitcoin falls first** → Risk-off signal may be forming  
-- **Nasdaq underperforms S&P500** → Growth stocks losing strength  
-- **Gold rises while stocks stall** → Capital moving to safety  
-- **S&P500 breaks trend last** → Often confirms real drawdown phase  
+### 📌 How to interpret (for US stock investors)
 
-This dashboard is designed to help you **delay entry or reduce exposure**
-when early warning signals appear.
+- **Bitcoin weakens first** → risk appetite shrinking
+- **Nasdaq underperforms S&P500** → growth stocks losing momentum
+- **Gold rising while stocks stall** → defensive rotation
+- **S&P500 breaks last** → confirms real drawdown
+
+This chart helps you **avoid entering US equities too early**,
+not to trade Bitcoin itself.
 """)
-
-st.warning(
-    "This is NOT a buy/sell tool. "
-    "Use it to adjust exposure timing before entering US equities."
-)
