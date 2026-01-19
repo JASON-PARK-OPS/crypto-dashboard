@@ -5,12 +5,11 @@ import plotly.graph_objects as go
 import numpy as np
 
 st.set_page_config(layout="wide")
+st.title("📊 글로벌 자산 비교 & 미국 주식시장 위험도")
 
-st.title("📊 글로벌 자산 가격 & 미국 주식시장 위험도 대시보드")
-
-# ===============================
-# 1️⃣ 데이터 설정
-# ===============================
+# =========================
+# 1. 자산 정의 (표시 이름 고정)
+# =========================
 ASSETS = {
     "Bitcoin": "BTC-USD",
     "S&P 500": "^GSPC",
@@ -20,100 +19,81 @@ ASSETS = {
 
 START_DATE = "2020-01-01"
 
-# ===============================
-# 2️⃣ 데이터 로드
-# ===============================
+# =========================
+# 2. 데이터 로드
+# =========================
 @st.cache_data
-def load_prices():
-    series = []
-
+def load_data():
+    data = {}
     for name, ticker in ASSETS.items():
         df = yf.download(ticker, start=START_DATE, progress=False)
+        if not df.empty:
+            data[name] = df["Close"]
+    return pd.DataFrame(data)
 
-        if df.empty or "Close" not in df:
-            continue
-
-        s = df["Close"].copy()
-        s.name = name
-        series.append(s)
-
-    return pd.concat(series, axis=1)
-
-price_df = load_prices()
+price_df = load_data()
 
 if price_df.empty:
-    st.error("데이터를 불러오지 못했습니다.")
+    st.error("데이터 로드 실패")
     st.stop()
 
-# ===============================
-# 3️⃣ 가격 차트 (로그 스케일)
-# ===============================
-st.subheader("📈 자산 가격 추세 (로그 스케일)")
+# =========================
+# 3. 정규화 가격 (가장 반응 좋았던 방식)
+# =========================
+normalized = price_df / price_df.iloc[0] * 100
+
+st.subheader("📈 자산 가격 추세 (정규화, 시작=100)")
 
 fig_price = go.Figure()
-
-for col in price_df.columns:
+for col in normalized.columns:
     fig_price.add_trace(
         go.Scatter(
-            x=price_df.index,
-            y=price_df[col],
+            x=normalized.index,
+            y=normalized[col],
             mode="lines",
             name=col
         )
     )
 
 fig_price.update_layout(
-    yaxis_type="log",
     xaxis_title="Date",
-    yaxis_title="Price (Log Scale)",
-    legend_title="Asset",
+    yaxis_title="Normalized Price (Start = 100)",
     height=500
 )
 
 st.plotly_chart(fig_price, use_container_width=True)
 
 st.markdown("""
-**설명 (로그 차트)**  
-- 실제 가격을 그대로 사용  
-- 로그 스케일 → 비율 변화가 잘 보임  
-- 비트코인 때문에 주식·금이 눌려 보이던 문제 해결  
-- 장기 추세 비교에 가장 적합
+**그래프 설명 (고등학생도 이해 가능)**  
+- 모든 자산을 같은 출발선(100)에서 시작  
+- 위로 갈수록 → 상대적으로 더 강한 자산  
+- 비트코인·금·주식의 **추세 차이**가 명확히 보임  
 """)
 
-# ===============================
-# 4️⃣ 변동성 계산 (20일)
-# ===============================
+# =========================
+# 4. 변동성 (20일, 위험 신호 핵심)
+# =========================
 returns = price_df.pct_change()
-vol_df = returns.rolling(20).std() * 100  # %
+vol = returns.rolling(20).std() * 100
 
 st.subheader("⚠️ 20일 변동성 (시장 위험도)")
 
 fig_vol = go.Figure()
-
-for col in vol_df.columns:
+for col in vol.columns:
     fig_vol.add_trace(
         go.Scatter(
-            x=vol_df.index,
-            y=vol_df[col],
+            x=vol.index,
+            y=vol[col],
             mode="lines",
             name=col
         )
     )
 
-# 위험 구간 수평선
-levels = {
-    "매우 안정": 1.2,
-    "안정": 2.0,
-    "주의": 3.0
-}
-
-for label, y in levels.items():
-    fig_vol.add_hline(
-        y=y,
-        line_dash="dash",
-        annotation_text=label,
-        annotation_position="top left"
-    )
+# 위험 기준선
+fig_vol.add_hline(y=1.2, line_dash="dash", annotation_text="매우 안정")
+fig_vol.add_hline(y=2.0, line_dash="dash", annotation_text="안정")
+fig_vol.add_hline(y=3.0, line_dash="dash", annotation_text="주의")
+fig_vol.add_hline(y=4.0, line_dash="dash", annotation_text="위험")
 
 fig_vol.update_layout(
     xaxis_title="Date",
@@ -124,52 +104,44 @@ fig_vol.update_layout(
 st.plotly_chart(fig_vol, use_container_width=True)
 
 st.markdown("""
-**설명 (변동성 차트)**  
-- 20일간 가격 흔들림의 크기  
+**변동성 해석 방법**  
 - 변동성 상승 = 시장 불안 증가  
-- 하락장은 항상 변동성 상승이 먼저 나타남
+- 하락장은 항상 변동성 상승이 먼저 발생  
+- “조용히 무너지는 장”은 거의 없음  
 """)
 
-# ===============================
-# 5️⃣ 미국 주식시장 자동 판단
-# ===============================
-latest = vol_df.dropna().iloc[-1]
+# =========================
+# 5. 미국 주식시장 자동 판단
+# =========================
+latest = vol.dropna().iloc[-1]
+sp = latest["S&P 500"]
+nas = latest["Nasdaq"]
+avg_vol = (sp + nas) / 2
 
-sp = latest.get("S&P 500", np.nan)
-nas = latest.get("Nasdaq", np.nan)
+if avg_vol < 1.2:
+    status = "🟢 매우 안정"
+elif avg_vol < 2.0:
+    status = "🟡 안정"
+elif avg_vol < 3.0:
+    status = "🟠 주의"
+else:
+    status = "🔴 위험"
 
-def judge(sp, nas):
-    avg = (sp + nas) / 2
+st.markdown("---")
+st.subheader("📌 현재 미국 주식시장 판단")
 
-    if avg < 1.2:
-        return "🟢 매우 안정", avg
-    elif avg < 2.0:
-        return "🟡 안정", avg
-    elif avg < 3.0:
-        return "🟠 주의", avg
-    else:
-        return "🔴 위험", avg
-
-if not np.isnan(sp) and not np.isnan(nas):
-    status, avg_vol = judge(sp, nas)
-
-    st.markdown("---")
-    st.subheader("📌 현재 미국 주식시장 변동성 판단")
-
-    st.markdown(f"""
-### **결론: {status}**
-최근 20일 기준 평균 변동성: **{avg_vol:.2f}%**
+st.markdown(f"""
+### 결론: **{status}**
+S&P 500 + Nasdaq 평균 변동성: **{avg_vol:.2f}%**
 """)
 
-    st.markdown("""
+st.markdown("""
 <span style="font-size:0.85em; color:gray">
 
-**판단 로직 설명**  
-- S&P 500 + Nasdaq 변동성을 사용  
-- 변동성은 하락장의 가장 빠른 선행 신호  
-- 두 지수를 평균 내 시장 전체 위험도를 단순화  
-- 낮은 변동성 → 추세 유지 가능성 높음  
-- 급등 시 → 조정·하락 가능성 증가  
+**판단 로직**  
+- 미국 주식시장의 본질은 S&P 500 + Nasdaq  
+- 두 지수의 변동성이 동시에 오르면 → 하락 확률 급증  
+- 현재는 “공포 단계 전인지 / 이미 위험한지”를 구분하는 구간  
 
 </span>
 """, unsafe_allow_html=True)
