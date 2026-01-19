@@ -39,22 +39,33 @@ def load_data(period):
             progress=False
         )
 
-        if not df.empty:
-            s = df["Close"].rename(name)
-            series_list.append(s)
+        if df.empty:
+            continue
 
-    # OUTER JOIN (중요!)
+        # 🔧 핵심 수정 부분
+        close = df["Close"]
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+
+        s = close.rename(name)
+        series_list.append(s)
+
+    if not series_list:
+        return pd.DataFrame()
+
     price_df = pd.concat(series_list, axis=1, join="outer")
-
-    # 날짜 정렬
     price_df = price_df.sort_index()
 
     return price_df
 
 price_df = load_data(period)
 
+if price_df.empty:
+    st.error("데이터를 불러오지 못했습니다. 기간을 바꿔보세요.")
+    st.stop()
+
 # -----------------------
-# Normalize (자산별 첫 유효값 기준)
+# Normalize
 # -----------------------
 normalized = price_df.copy()
 
@@ -89,16 +100,15 @@ fig.update_layout(
 st.plotly_chart(fig, use_container_width=True)
 
 # -----------------------
-# Interpretation
+# Explanation
 # -----------------------
 st.markdown("""
-### 📌 How to use this (US stock investor perspective)
+### 📌 How to interpret (US stock risk detection)
 
 - **Bitcoin weakens first** → speculative risk is leaving
 - **Nasdaq underperforms S&P500** → growth stocks vulnerable
-- **Gold rises while equities stall** → defensive positioning
-- **S&P500 breaks trend last** → confirms real market drawdown
+- **Gold rises while stocks stall** → defensive rotation
+- **S&P500 breaks last** → confirms real drawdown
 
-This dashboard is designed to help you **delay entry or reduce exposure**
-before major US equity corrections.
+This tool is designed to help you **avoid entering US equities too early**.
 """)
