@@ -18,10 +18,10 @@ ASSETS = {
 }
 
 # ===============================
-# 기간 & 주기 선택
+# 기간 / 주기 선택
 # ===============================
 freq = st.sidebar.selectbox(
-    "📅 차트 단위 선택",
+    "📅 차트 단위",
     ["일", "주", "월", "연"]
 )
 
@@ -38,11 +38,11 @@ period = st.sidebar.selectbox(
 )
 
 # ===============================
-# 데이터 로드
+# 데이터 로드 (안정 버전)
 # ===============================
 @st.cache_data
 def load_prices(interval):
-    series = []
+    series_list = []
 
     for name, ticker in ASSETS.items():
         df = yf.download(
@@ -53,18 +53,25 @@ def load_prices(interval):
             progress=False
         )
 
-        if df.empty:
+        if df is None or df.empty:
             continue
 
-        s = df["Close"].rename(name)
-        series.append(s)
+        if "Close" not in df.columns:
+            continue
 
-    return pd.concat(series, axis=1).dropna()
+        s = df["Close"].copy()
+        s.name = name
+        series_list.append(s)
+
+    if not series_list:
+        return pd.DataFrame()
+
+    return pd.concat(series_list, axis=1).dropna()
 
 price_df = load_prices(freq_map[freq])
 
 if price_df.empty:
-    st.error("데이터를 불러오지 못했습니다.")
+    st.error("데이터를 불러오지 못했습니다. 기간이나 단위를 바꿔보세요.")
     st.stop()
 
 # ===============================
@@ -86,19 +93,18 @@ st.plotly_chart(fig1, use_container_width=True)
 
 st.markdown("""
 **설명**  
-- 모든 자산을 같은 출발점에서 비교  
-- 비트코인처럼 변동성이 큰 자산 때문에  
-  주식·금이 안 보이던 문제를 해결  
+- 모든 자산을 같은 출발선에서 비교  
+- 비트코인 때문에 주식·금이 평평해 보이던 문제 해결  
 - 장기 추세 비교에 가장 적합
 """)
 
 # ===============================
-# 2️⃣ 변동성 그래프 (시장 불안도)
+# 2️⃣ 변동성 (시장 불안도)
 # ===============================
-volatility_df = price_df.pct_change().rolling(20).std() * 100
+vol_df = price_df.pct_change().rolling(20).std() * 100
 
 fig2 = px.line(
-    volatility_df,
+    vol_df,
     title="🌊 20일 변동성 비교 (시장 불안도)"
 )
 
@@ -112,8 +118,8 @@ st.plotly_chart(fig2, use_container_width=True)
 st.markdown("""
 **설명**  
 - 변동성 급증 = 시장 불안  
-- 하락장은 항상 변동성 상승이 먼저 나타남  
-- 주식 변동성이 튀기 시작하면 경계 신호
+- 하락장은 항상 변동성 상승이 먼저 발생  
+- 주식 변동성이 먼저 튀면 경계 필요
 """)
 
 # ===============================
@@ -144,7 +150,7 @@ st.plotly_chart(fig3, use_container_width=True)
 
 st.markdown("""
 **설명**  
-- 0 아래로 내려가면 → 위험 회피 국면  
-- 금이 강해지고 주식이 약해질수록 하락장 가능성 ↑  
-- 장기 투자자가 비중 조절을 고민해야 하는 구간
+- 0 아래 → 위험 회피 국면  
+- 금이 강하고 주식이 약하면 하락장 확률 상승  
+- 장기 투자자는 이 구간에서 비중 조절 고려
 """)
